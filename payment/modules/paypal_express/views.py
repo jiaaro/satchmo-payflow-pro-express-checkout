@@ -71,7 +71,7 @@ def pp_express_pay_ship_info_verify(request, payment_module):
     except:
         state = " "
     postal_code = response_dict["SHIPTOZIP"][0]
-    country_code = response_dict["SHIPTOCOUNTRYCODE"][0]
+    country_code = response_dict["SHIPTOCOUNTRY"][0]
 
     country = Country.objects.get(iso2_code__iexact=country_code)
     # I get users notes
@@ -239,9 +239,9 @@ def paypal_express_request_authorization(request):
     noshipping = 0        
 
     params = {
-            'METHOD' : "SetExpressCheckout",
+            'ACTION' : "S", # SetExpressCheckout
             'NOSHIPPING' : noshipping, #1,
-            'PAYMENTACTION' : 'Authorization',
+            'TRXTYPE' : 'S', # Sale
             'CURRENCYCODE' : payment_module.CURRENCY_CODE.value.encode(),  # from Unicode
             'ALLOWNOTE' : 1, #true
             'AMT' : amt,
@@ -249,7 +249,7 @@ def paypal_express_request_authorization(request):
             'LANDINGPAGE' : "Billing",
             'REQCONFIRMSHIPPING': 0,
             'SOLUTIONTYPE': "Sole", # Do not require forced paypal registration
-            'HDRIMG': paypal.shop_logo
+            #'HDRIMG': paypal.shop_logo
     #        'HANDLINGAMT' : order.shipping_cost, 
     #        'ITEMAMT' : order.total,
     #        'TAXAMT': order.tax,
@@ -338,7 +338,7 @@ def paypal_express_pay(request):
         response_getDetails = paypal.GetExpressCheckoutDetails(paypal_express_token, return_all=True)
         params = {
             'PAYERID' : response_getDetails["PAYERID"][0],
-            'CURRENCYCODE' : response_getDetails["CURRENCYCODE"][0],
+            'CURRENCYCODE' : 'USD',
             'AMT' : '%.2f' % order.total,
             'ITEMAMT' : '%.2f' % order.sub_total,
             'SHIPPINGAMT' : '%.2f' % order.shipping_cost,
@@ -348,14 +348,14 @@ def paypal_express_pay(request):
         }
         
         # This function does the payment
-        data = paypal.DoExpressCheckoutPayment(params )
+        data = paypal.DoExpressCheckoutPayment(params)
       
 
     #try:
     
     log.debug("PayPal Express Checkout data: " + repr(data))
     
-    if not 'PAYMENTSTATUS' in data or not data['PAYMENTSTATUS'] == 'Completed':
+    if not 'RESULT' in data or not data['RESULT'] == '0':
     #if not 'payment_status' in data or not data['payment_status'] == "Completed":
         # We want to respond to anything that isn't a payment - but we won't insert into our database.
         log.info("Ignoring IPN data for non-completed payment.")
@@ -367,45 +367,45 @@ def paypal_express_pay(request):
 
         ctx = RequestContext(request, {'order': order,
              'data': repr(data),
-             'ack': data["ACK"],
+             'ack': data["RESPMSG"],
              #'severity_code': data["L_SEVERITYCODE0"],
              #'short_message': data["L_SHORTMESSAGE0"],
              #'long_message': data["L_LONGMESSAGE0"],
              #'error_code': data["L_ERRORCODE0"],
         })
 
-        # Li aggiungo fuori perché se ne manca uno altrimenti restituisce un keyerror
+        # Li aggiungo fuori perche se ne manca uno altrimenti restituisce un keyerror
         try:
-            ctx["severity_code"]= data["L_SEVERITYCODE0"]
+            ctx["severity_code"]= data["RESULT"]
         except:
             pass
 
         try:
-            ctx["short_message"]= data["L_SHORTMESSAGE0"]
+            ctx["short_message"]= data["RESPMSG"]
         except:
             pass
 
          
         try:
-            ctx["long_message"]= data["L_LONGMESSAGE0"]
+            ctx["long_message"]= data["RESPMSG"]
         except:
             pass
 
         try:
-            ctx["error_code"]=data["L_ERRORCODE0"]
+            ctx["error_code"]=data["RESULT"]
         except:
             pass
         
         return render_to_response(template, ctx)
         
 
-    txn_id = data['TRANSACTIONID']
+    txn_id = data['PNREF']
     
     if not OrderPayment.objects.filter(transaction_id=txn_id).count():
         
     # If the payment hasn't already been processed:
         #order = Order.objects.get(pk=invoice)         
-        order.add_status(status='Pending', notes=_("Paid through PayPal Express Checkout."))
+        order.add_status(status='Billed', notes=_("Paid through PayPal Express Checkout."))
         #orderstatus = order.status
         
         record_payment(order, payment_module, amount=order.total, transaction_id=txn_id)

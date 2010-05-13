@@ -21,25 +21,19 @@ class PayPal:
             log.debug("live order on %s", payment_module.KEY.value)
             self.PAYPAL_URL = payment_module.POST_URL.value
             self.API_ENDPOINT = payment_module.ENDPOINT_URL.value
-            api_signature_username = payment_module.API_SIGNATURE_USERNAME.value
-            api_signature_password = payment_module.API_SIGNATURE_PASSWORD.value
-            api_signature_code = payment_module.API_SIGNATURE_CODE.value
             
             #account = payment_module.BUSINESS.value
         else:
             log.debug("test order on %s", payment_module.KEY.value)
             self.PAYPAL_URL = payment_module.POST_TEST_URL.value
             self.API_ENDPOINT = payment_module.ENDPOINT_TEST_URL.value
-            api_signature_username = payment_module.SANDBOX_API_SIGNATURE_USERNAME.value
-            api_signature_password = payment_module.SANDBOX_API_SIGNATURE_PASSWORD.value
-            api_signature_code = payment_module.SANDBOX_API_SIGNATURE_CODE.value
 
         ## Sandbox values
         self.signature_values = {
-        'USER' : api_signature_username, 
-        'PWD' : api_signature_password, 
-        'SIGNATURE' : api_signature_code,
-        'VERSION' : '53.0',
+        'USER' : payment_module.API_USER.value, 
+        'VENDOR' : payment_module.API_MERCHANT_LOGIN_ID.value,
+        'PARTNER' : payment_module.API_PARTNER.value,
+        'PWD' : payment_module.API_PASSWORD.value
         }
 
         self.signature = urllib.urlencode(self.signature_values) + "&"
@@ -47,27 +41,33 @@ class PayPal:
         
         self.return_url = lookup_url(payment_module, 'satchmo_checkout-step2')
         self.return_url = "http://" + settings.SITE_DOMAIN + self.return_url
+        
         self.cancel_url = lookup_url(payment_module, 'satchmo_checkout-cancel')
         self.cancel_url = "http://" + settings.SITE_DOMAIN + self.cancel_url
         
-	if payment_module.SHOP_LOGO.value.startswith("http"):
-	    self.shop_logo = payment_module.SHOP_LOGO.value
-	else:	
+        if payment_module.SHOP_LOGO.value.startswith("http"):
+            self.shop_logo = payment_module.SHOP_LOGO.value
+        else:	
             self.shop_logo = "http://" + settings.SITE_DOMAIN + payment_module.SHOP_LOGO.value
-        self.localecode = payment_module.DEFAULT_LOCALECODE.value.upper().encode() # from unicode
+            self.localecode = payment_module.DEFAULT_LOCALECODE.value.upper().encode() # from unicode
 
     # API METHODS
     def SetExpressCheckout(self, params):
         default_params = {
-            'METHOD' : "SetExpressCheckout",
+            'ACTION' : "S", # SetExpressCheckout
             'NOSHIPPING' : 1,
-            'PAYMENTACTION' : 'Authorization',
+            'TRXTYPE' : 'S', # Sale
             'RETURNURL' : self.return_url,
             'CANCELURL' : self.cancel_url,
+            'TENDER': 'P', # Paypal
             'AMT' : 100,
         }
         default_params.update(params)
         params_string = self.signature + urllib.urlencode(default_params)
+        
+        #weired API quirk
+        params_string = params_string.replace(r"%3A", ":").replace(r"%2F", "/")
+        
         response = urllib.urlopen(self.API_ENDPOINT, params_string).read()
         response_dict = parse_qs(response)
         try:
@@ -81,13 +81,19 @@ class PayPal:
     
     def GetExpressCheckoutDetails(self, token, return_all = False):
         default_params = {
-            'METHOD' : "GetExpressCheckoutDetails",
+            'ACTION' : "G", # GetExpressCheckoutDetails
+            'TRXTYPE': 'S', # Sale
+            'TENDER' : 'P',
             'RETURNURL' : self.return_url, 
             'CANCELURL' : self.cancel_url,  
             'TOKEN' : token,
         }
         #default_params.update(params)
         params_string = self.signature + urllib.urlencode(default_params)
+        
+        #weired API quirk
+        params_string = params_string.replace(r"%3A", ":").replace(r"%2F", "/")
+        
         response = urllib.urlopen(self.API_ENDPOINT, params_string).read()
         response_dict = parse_qs(response)
         if return_all:
@@ -101,10 +107,11 @@ class PayPal:
     def DoExpressCheckoutPayment(self, params):
         
         default_params = {
-            'METHOD' : "DoExpressCheckoutPayment",
-            'PAYMENTACTION' : 'Sale',
+            'ACTION' : "D", # DoExpressCheckoutPayment
+            'TRXTYPE' : 'S', # Sale
             'RETURNURL' : self.return_url,#'http://www.yoursite.com/returnurl', #edit this 
             'CANCELURL' : self.cancel_url,#'http://www.yoursite.com/cancelurl', #edit this 
+            'TENDER' : 'P', # Paypal
             #'TOKEN' : token,
             #'AMT' : amt,
             #'PAYERID' : payer_id,
@@ -113,6 +120,10 @@ class PayPal:
         default_params.update(params)
                      
         params_string = self.signature + urllib.urlencode(default_params)
+        
+        #weired API quirk
+        params_string = params_string.replace(r"%3A", ":").replace(r"%2F", "/")
+        
         response = urllib.urlopen(self.API_ENDPOINT, params_string).read()
         response_tokens = {}
         for token in response.split('&'):
@@ -123,10 +134,16 @@ class PayPal:
         
     def GetTransactionDetails(self, tx_id):
         params = {
-            'METHOD' : "GetTransactionDetails", 
+            'ACTION' : "G", # GetTransactionDetails 
+            'TRXTYPE' : 'S',
+            'TENDER' : 'P',
             'TRANSACTIONID' : tx_id,
         }
         params_string = self.signature + urllib.urlencode(params)
+        
+        #weired API quirk
+        params_string = params_string.replace(r"%3A", ":").replace(r"%2F", "/")
+        
         response = urllib.urlopen(self.API_ENDPOINT, params_string).read()
         response_tokens = {}
         for token in response.split('&'):
